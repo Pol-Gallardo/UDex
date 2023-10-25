@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.19;
 
 import {Oracle} from "./Oracle.sol";
 import {AggregatorV3Interface} from "@pluginV2/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
@@ -28,7 +28,6 @@ contract UDex is ERC4626, Ownable, ReentrancyGuard {
     AggregatorV3Interface public immutable i_priceFeed;
 
     IERC20 public immutable i_xdc;
-    uint16 private constant DEAD_SHARES = 1000;
 
     PositionsSummary totalLongPositions;
     PositionsSummary totalShortPositions;
@@ -43,23 +42,25 @@ contract UDex is ERC4626, Ownable, ReentrancyGuard {
     //================================================================================
 
     event PositionOpened(
-        address indexed user, bool isLong, uint256 collateral, uint256 size, uint256 ethAmount, uint256 avgEthPrice
+        address indexed user, bool isLong, uint256 collateral, uint256 size, uint256 xdcAmount, uint256 avgXdcPrice
     );
+
+    event PositionDecreased(address indexed user, uint256 collateralDecreased, uint256 sizeDecreased);
 
     //================================================================================
     // Custom Structs
     //================================================================================
     struct Position {
         uint256 collateral;
-        uint256 avgEthPrice;
-        uint256 ethAmount;
+        uint256 avgXdcPrice;
+        uint256 xdcAmount;
         bool isLong;
         uint256 lastChangeTimestamp;
     }
 
     struct PositionsSummary {
+        uint256 sizeInUsdt;
         uint256 sizeInXdc;
-        uint256 sizeInEth;
     }
 
     //================================================================================
@@ -71,14 +72,20 @@ contract UDex is ERC4626, Ownable, ReentrancyGuard {
     constructor(address priceFeed, IERC20 _xdc) ERC4626(_xdc) ERC20("UDex", "UDX") Ownable(msg.sender) {
         i_priceFeed = AggregatorV3Interface(priceFeed);
         i_xdc = IERC20(_xdc);
-
-        // avoiding inflationary attack
-        /* _mint(address(this), DEAD_SHARES); */
     }
 
     //================================================================================
     // Override ERC4626
     //================================================================================
+
+    function totalAssets() public view virtual override returns (uint256) {
+        int256 tradersPnL = getTradersPnL();
+        if (tradersPnL > 0) {
+            return super.totalAssets() - tradersPnL.toUint256() - tradersCollateral;
+        }
+        tradersPnL = -tradersPnL;
+        return super.totalAssets() + tradersPnL.toUint256() - tradersCollateral;
+    }
 
     function deposit(uint256 assets, address receiver) public override nonReentrant returns (uint256 shares) {
         uint256 newTotalLiquidity = s_totalLiquidityDeposited + assets;
@@ -115,7 +122,11 @@ contract UDex is ERC4626, Ownable, ReentrancyGuard {
     // Traders functionality
     //================================================================================
 
-    function openPosition(uint256 size, uint256 collateral, bool isLong) public {
+    function tryfunction(bool isTrue) public returns (bool) {
+        return true;
+    }
+
+    function openPosition(uint256 size, uint256 collateral, uint256 currentXDCPrice, bool isLong) public {
         if (collateral <= 0) {
             revert LibError.UDex__ErrorInsufficientCollateral();
         }
@@ -126,49 +137,98 @@ contract UDex is ERC4626, Ownable, ReentrancyGuard {
             revert LibError.UDex__PositionAlreadyExist();
         }
 
-        uint256 currentETHPrice = getPrice();
+        /* uint256 currentXDCPrice = getPrice(); */
 
         //createPosition
         Position memory position = Position({
-            avgEthPrice: currentETHPrice, //review about decimals precision
+            avgXdcPrice: currentXDCPrice, //review about decimals precision
             collateral: collateral, //same review
-            ethAmount: size / currentETHPrice, // review
+            xdcAmount: size / currentXDCPrice, // review
             isLong: isLong,
             lastChangeTimestamp: block.timestamp
         });
-        _checkPositionHealth(position, currentETHPrice);
+        _checkPositionHealth(position, currentXDCPrice);
         i_xdc.safeTransferFrom(msg.sender, address(this), collateral);
 
         //contract state
         tradersCollateral += position.collateral;
         positions[msg.sender] = position;
-        _increasePositionsSumary(size, position.ethAmount, isLong); //review decimals
+        _increasePositionsSumary(size, position.xdcAmount, isLong); //review decimals
 
-        emit PositionOpened(msg.sender, position.isLong, size, collateral, position.ethAmount, position.avgEthPrice);
+        emit PositionOpened(msg.sender, position.isLong, size, collateral, position.xdcAmount, position.avgXdcPrice);
+    }
+
+    /*  */
+
+    //================================================================================
+    // Public utility functions
+    //================================================================================
+    function getPosition(address owner) public view returns (Position memory position) {
+        Position memory requestedPosition = positions[owner];
+        if (requestedPosition.collateral == 0) {
+            revert LibError.UDex__PositionDoesNotExist();
+        }
+        return positions[owner];
+    }
+
+    function getTradersPnL() public view returns (int256) {
+        int256 longPnL =
+        //  200000e8 xdc   10000usdt
+         getUsdtValue(totalLongPositions.sizeInXdc, 1).toInt256() - totalLongPositions.sizeInUsdt.toInt256();
+
+        int256 shortPnL =
+            totalShortPositions.sizeInUsdt.toInt256() - getUsdtValue(totalShortPositions.sizeInXdc, 1).toInt256();
+
+        return (shortPnL + longPnL) / 1e18; //REVIEW
     }
 
     //================================================================================
     // Oracle Price
     //================================================================================
-    function getPrice() public view returns (uint256) {
+    /* function getPrice() public view returns (uint256) {
         return Oracle.getPrice(i_priceFeed);
+    }
+
+    function getUsdtValue(uint256 amount) public view returns (uint256) {
+        uint256 usdtValue = amount.getConversionRateinUsdt(i_priceFeed);
+        return (usdtValue);
+    } */
+
+    function getPrice(uint256 currentXDCPrice) public view returns (uint256) {
+        return currentXDCPrice;
+    }
+
+    function getUsdtValue(uint256 amount, uint256 currentXDCPrice) public view returns (uint256) {
+        uint256 xdcPrice = getPrice(currentXDCPrice);
+        uint256 xdcAmountInUsdt = (xdcPrice * amount);
+        return xdcAmountInUsdt;
     }
     //================================================================================
     // Internal functions
     //================================================================================
 
-    function _increasePositionsSumary(uint256 sizeINXDC, uint256 sizeInEth, bool isLong) internal {
+    function _increasePositionsSumary(uint256 sizeInUsdt, uint256 sizeInXdc, bool isLong) internal {
         if (isLong) {
-            totalLongPositions.sizeInXdc += sizeINXDC;
-            totalLongPositions.sizeInEth += sizeInEth;
+            totalLongPositions.sizeInUsdt += sizeInUsdt;
+            totalLongPositions.sizeInXdc += sizeInXdc;
         } else {
-            totalShortPositions.sizeInXdc += sizeINXDC;
-            totalShortPositions.sizeInEth += sizeInEth;
+            totalShortPositions.sizeInUsdt += sizeInUsdt;
+            totalShortPositions.sizeInXdc += sizeInXdc;
         }
     }
 
-    function _checkPositionHealth(Position memory position, uint256 currentEthPrice) internal pure {
-        int256 positionPnL = _calculatePositionPnL(position, currentEthPrice);
+    function _decreasePositionsSummary(uint256 sizeInUsdt, uint256 sizeInXdc, bool isLong) internal {
+        if (isLong) {
+            totalLongPositions.sizeInUsdt -= sizeInUsdt;
+            totalLongPositions.sizeInXdc -= sizeInXdc;
+        } else {
+            totalShortPositions.sizeInUsdt -= sizeInUsdt;
+            totalShortPositions.sizeInXdc -= sizeInXdc;
+        }
+    }
+
+    function _checkPositionHealth(Position memory position, uint256 currentXdcPrice) internal pure {
+        int256 positionPnL = _calculatePositionPnL(position, currentXdcPrice);
 
         if (position.collateral.toInt256() + positionPnL <= 0) {
             revert LibError.UDex__InsufficientPositionCollateral();
@@ -176,18 +236,18 @@ contract UDex is ERC4626, Ownable, ReentrancyGuard {
 
         uint256 positionCollateral = (position.collateral.toInt256() + positionPnL).toUint256();
 
-        uint256 levarage = ((position.ethAmount * position.avgEthPrice) / positionCollateral); // review
+        uint256 levarage = ((position.xdcAmount * position.avgXdcPrice) / positionCollateral); // review
 
         if (levarage >= MAX_LEVARAGE) {
             revert LibError.UDex__BreaksHealthFactor();
         }
     }
 
-    function _calculatePositionPnL(Position memory position, uint256 currentEthPrice) internal pure returns (int256) {
-        int256 currentPositionValue = (position.ethAmount * currentEthPrice).toInt256();
-
-        int256 positionValueWhenCreated = (position.ethAmount * position.avgEthPrice).toInt256();
-
+    function _calculatePositionPnL(Position memory position, uint256 currentXdcPrice) internal pure returns (int256) {
+        int256 currentPositionValue = (position.xdcAmount * currentXdcPrice).toInt256();
+        // 100000 * 0.05 = 5000
+        int256 positionValueWhenCreated = (position.xdcAmount * position.avgXdcPrice).toInt256();
+        // 100000 * 0.05 = 5000
         if (position.isLong) {
             return (currentPositionValue - positionValueWhenCreated);
         } else {

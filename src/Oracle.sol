@@ -1,6 +1,6 @@
 // SFDX-License-Identifier: MIT
 
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.19;
 
 import {AggregatorV3Interface} from "@pluginV2/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import {LibError} from "./lib/LibError.sol";
@@ -18,5 +18,15 @@ library Oracle {
         }
 
         return uint256(answer) * DECIMALS_ADJUSTAMENTS;
+    }
+
+    function getConversionRateinUsdt(uint256 xdcAmount, AggregatorV3Interface priceFeed)
+        internal
+        view
+        returns (uint256)
+    {
+        uint256 xdcPrice = getPrice(priceFeed);
+        uint256 xdcAmountInUsdt = (xdcPrice * xdcAmount);
+        return xdcAmountInUsdt;
     }
 }
