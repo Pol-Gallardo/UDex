@@ -27,6 +27,8 @@ Universal  perpetual contracts Descentralized Exchange.
 ## Description
 UDEX (MVP) is XDC's own decentralized perpetual exchange. It differs from other exchanges such as [Fathum](https://fathom.fi/) and [Globiance](https://globiance.com/) as it allows you to trade with futures and leverage.
 
+Front Repository: https://github.com/armsves/udexfront
+
 ## Features
 * Exclusive logo for UDEX.
 * Trade with Futures.
