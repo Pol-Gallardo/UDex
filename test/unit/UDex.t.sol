@@ -16,7 +16,7 @@ contract UDexTest is StdCheats, Test {
     UDex uDex;
     HelperConfig public helperConfig;
 
-    address public ethXdcPriceFeed;
+    address public xdcPriceFeed;
     address public xdc;
     uint256 public deployerKey;
 
@@ -37,7 +37,7 @@ contract UDexTest is StdCheats, Test {
     function setUp() public {
         DeployUDex deployer = new DeployUDex();
         (uDex, helperConfig) = deployer.run();
-        (ethXdcPriceFeed, xdc, deployerKey) = helperConfig.activeNetworkConfig();
+        (xdcPriceFeed, xdc, deployerKey) = helperConfig.activeNetworkConfig();
         if (block.chainid == 31337) {
             XDC = ERC20Mock(uDex.asset());
             XDC.mint(lP1, 100_000);
@@ -82,6 +82,68 @@ contract UDexTest is StdCheats, Test {
 
         uDex.withdraw(1_000, lP1, lP1);
         assertEq(uDex.balanceOf(lP1), 9_000);
+        vm.stopPrank();
+    }
+
+    function testRemoveLiquidityWhilePnLisPostive() public addLP {
+        openTradePosition(trader1, 6_000, 6_000, true);
+        MockV3Aggregator(xdcPriceFeed).updateAnswer(12e8);
+
+        vm.startPrank(lP1);
+        uDex.withdraw(10_000, lP1, lP1);
+
+        assertEq(XDC.balanceOf(lP1), 100000);
+    }
+
+    //================================================================================
+    // Test get position
+    //================================================================================
+
+    function testOpenPositionTwiceForAddressFails() public addLP {
+        vm.startPrank(trader1);
+        XDC.approve(address(uDex), 5_000);
+        uDex.openPosition(1_000, 1_000, true);
+        vm.expectRevert();
+        uDex.openPosition(1_000, 1_000, true);
+    }
+
+    function testGetPosition() public addLP {
+        openTradePosition(trader1, 1_000, 5_000, false);
+
+        UDex.Position memory position = uDex.getPosition(trader1);
+
+        assertEq(position.collateral, 1_000);
+        assertEq(position.isLong, false);
+    }
+
+    //================================================================================
+    // Test Traders
+    //================================================================================
+    function testOpenLongPosition() public addLP {
+        openTradePosition(trader1, 1_000, 10_000, true);
+
+        assertEq(uDex.getTradersPnL(), 0);
+        assertEq(uDex.tradersCollateral(), 1_000);
+        assertEq(uDex.totalAssets(), 30_000);
+    }
+
+    function testOpenShortPosition() public addLP {
+        openTradePosition(trader1, 1_000, 10_000, false);
+
+        assertEq(uDex.getTradersPnL(), 0);
+        assertEq(uDex.tradersCollateral(), 1_000);
+        assertEq(uDex.totalAssets(), 30_000);
+    }
+
+    //================================================================================
+    // Internal Reusable functions
+    //================================================================================
+
+    function openTradePosition(address trader, uint256 collateral, uint256 size, bool isLong) internal {
+        vm.startPrank(trader);
+        XDC.approve(address(uDex), collateral);
+        uDex.openPosition(size, collateral, isLong);
+
         vm.stopPrank();
     }
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.19;
 
 import {Script} from "forge-std/Script.sol";
 import {UDex} from "../src/UDex.sol";
@@ -11,11 +11,11 @@ contract DeployUDex is Script {
     function run() external returns (UDex, HelperConfig) {
         HelperConfig config = new HelperConfig();
 
-        (address ethXdcPriceFeed, address xdc, uint256 deployerKey) = config.activeNetworkConfig();
+        (address xdcPriceFeed, address xdc, uint256 deployerKey) = config.activeNetworkConfig();
 
         vm.startBroadcast(deployerKey);
         UDex uDex = new UDex(
-            ethXdcPriceFeed,
+            xdcPriceFeed,
             IERC20(xdc)
         );
         vm.stopBroadcast();
