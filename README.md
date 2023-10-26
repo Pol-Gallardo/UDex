@@ -47,7 +47,7 @@ Front Repository: https://github.com/armsves/udexfront
 </div>
 
 ## Visuals
-![Front-end short video](https://github.com/Pol-Gallardo/UDex/blob/main/img/front.mp4)
+https://github.com/Pol-Gallardo/UDex/blob/main/img/front.mp4
 
 <div style="text-align: center;">
   <a href="#top">Move to the top</a>
